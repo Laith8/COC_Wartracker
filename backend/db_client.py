@@ -175,6 +175,9 @@ class DbClient:
                     WarParticipant.player_tag == player_tag,
                 )
             )
+            player = await session.scalar(
+                select(Player).where(Player.tag == player_tag)
+            )
 
             participant_fields = {
                 "war_id": war_id,
@@ -183,6 +186,12 @@ class DbClient:
                 "map_position": map_position,
                 "town_hall": town_hall,
                 "attacks_allowed": attacks_allowed,
+                "king": player.king,
+                "queen": player.queen,
+                "minion": player.minion,
+                "warden": player.warden,
+                "champion": player.champion,
+                "duke": player.duke,
             }
 
             if participant:
