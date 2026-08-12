@@ -15,10 +15,18 @@ def parse_coc_datetime(value: str) -> datetime:
 class ClashClan:
     tag: str
     name: str
+    playertags: list[str]
 
     @classmethod
     def from_api(cls, data: dict) -> ClashClan:
-        return cls(tag=data['tag'], name=data['name'])
+        return cls(
+            tag=data['tag'], 
+            name=data['name'],
+            player_tags = [
+                player.tag
+                for player in data['memberList']
+            ]
+        )
 
 @dataclass
 class ClashPlayer:
