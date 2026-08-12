@@ -222,7 +222,7 @@ class DbClient:
         destruction: int,
         fresh_hit: bool | None = None,
         cleanup: bool | None = None,
-        attack_time: datetime | None = None,
+        attack_time: int | None = None,
     ) -> Attack:
         async with SessionLocal() as session:
             attack = await session.scalar(
