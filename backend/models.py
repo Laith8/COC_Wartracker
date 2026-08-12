@@ -11,10 +11,11 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    CheckConstraint
+    CheckConstraint,
+    ForeignKeyConstraint,
 )
 
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, foreign
 
 from database import Base
 
@@ -223,13 +224,20 @@ class WarParticipant(Base):
 
     attacks_made = relationship(
         "Attack",
-        primaryjoin="WarParticipant.id==foreign(Attack.attacker_id)",
-        viewonly=True,
+        primaryjoin=lambda: (
+            (WarParticipant.war_id == Attack.war_id)
+            & (WarParticipant.player_tag == foreign(Attack.attacker_id))
+        ),
+        back_populates="attacker",
     )
+
     attacks_received = relationship(
         "Attack",
-        primaryjoin="WarParticipant.id==foreign(Attack.defender_id)",
-        viewonly=True,
+        primaryjoin=lambda: (
+            (WarParticipant.war_id == Attack.war_id)
+            & (WarParticipant.player_tag == foreign(Attack.defender_id))
+        ),
+        back_populates="defender",
     )
 
     @property
@@ -273,8 +281,8 @@ class Attack(Base):
     id = Column(Integer, primary_key=True)
 
     war_id = Column(Integer, ForeignKey("wars.id"), nullable=False, index=True)
-    attacker_id = Column(Integer, ForeignKey("war_participants.id"), nullable=False, index=True)
-    defender_id = Column(Integer, ForeignKey("war_participants.id"), nullable=False, index=True)
+    attacker_id = Column(String, nullable=False, index=True)
+    defender_id = Column(String, nullable=False, index=True)
     attack_number = Column(Integer, nullable=False)
 
     stars = Column(Integer, nullable=False)
@@ -283,19 +291,39 @@ class Attack(Base):
     fresh_hit = Column(Boolean, default=False, nullable=False)
     cleanup = Column(Boolean, default=False, nullable=False)
 
-    attack_time = Column(DateTime, default=utcnow, nullable=False)
+    attack_time = Column(Integer, default=0, nullable=False)
 
     war = relationship("War", back_populates="attacks")
+
     attacker = relationship(
-        "WarParticipant", back_populates="attacks_made", foreign_keys=[attacker_id]
+        "WarParticipant",
+        primaryjoin=lambda: (
+            (Attack.war_id == WarParticipant.war_id)
+            & (Attack.attacker_id == foreign(WarParticipant.player_tag))
+        ),
+        viewonly=True,
     )
+
     defender = relationship(
-        "WarParticipant", back_populates="attacks_received", foreign_keys=[defender_id]
+        "WarParticipant",
+        primaryjoin=lambda: (
+            (Attack.war_id == WarParticipant.war_id)
+            & (Attack.defender_id == foreign(WarParticipant.player_tag))
+        ),
+        viewonly=True,
     )
 
     __table_args__ = (
         UniqueConstraint(
             "war_id", "attacker_id", "attack_number",
             name="uq_attack_war_attacker_number",
+        ),
+        ForeignKeyConstraint(
+            ["war_id", "attacker_id"],
+            ["war_participants.war_id", "war_participants.player_tag"],
+        ),
+        ForeignKeyConstraint(
+            ["war_id", "defender_id"],
+            ["war_participants.war_id", "war_participants.player_tag"],
         ),
     )
