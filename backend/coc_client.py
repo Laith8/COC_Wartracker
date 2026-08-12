@@ -1,15 +1,9 @@
 from __future__ import annotations
-import httpx
-from urllib.parse import quote
-from models import Clan, Player, PlayerClanHistory, War, WarParticipant, Attack, WarResult, WarType
-from sqlalchemy import select
-from database import get_db, engine, SessionLocal
-from sqlalchemy.orm import Session
-import os
-from db_client import DbClient
-from dataclasses import dataclass
-import asyncio, time
 from datetime import datetime, timezone
+from models import WarResult, WarType
+from dataclasses import dataclass
+from urllib.parse import quote
+import httpx, os, asyncio, time
 
 def parse_coc_datetime(value: str) -> datetime:
     return datetime.strptime(
