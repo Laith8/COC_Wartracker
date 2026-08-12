@@ -237,6 +237,7 @@ class DbClient:
                 "war_id": war_id,
                 "attacker_id": attacker_id,
                 "defender_id": defender_id,
+                "attack_number": attack_number,
                 "stars": stars,
                 "destruction": destruction,
                 "fresh_hit": fresh_hit,
