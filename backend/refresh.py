@@ -113,6 +113,7 @@ async def refresh():
         for participant in war.participants
         for attack in participant.attacks
     ])
+    await dbclient.resolve_war_statuses()
 
 async def refresh_loop():
     try:

@@ -265,3 +265,22 @@ class DbClient:
             result = await session.scalars(q)
             response = result.all()
         return response
+
+    async def resolve_war_statuses(self) -> None:
+        q = select(War).where(War.result.is_(WarResult.ENDED_UNKNOWN))
+        async with SessionLocal() as session:
+            result = await session.scalars(q)
+            response = result.all()
+            for war in response:
+                if war.our_stars > war.enemy_stars:
+                    war.result = WarResult.WIN
+                elif war.our_stars < war.enemy_stars:
+                    war.result = WarResult.LOSS
+                else:
+                    if war.our_destruction > war.enemy_destruction:
+                        war.result = WarResult.WIN
+                    elif war.our_destruction < war.enemy_destruction:
+                        war.result = WarResult.LOSS
+                    else:
+                        war.result = WarResult.DRAW
+            await session.commit()
