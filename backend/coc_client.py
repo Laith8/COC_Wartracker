@@ -15,7 +15,7 @@ def parse_coc_datetime(value: str) -> datetime:
 class ClashClan:
     tag: str
     name: str
-    playertags: list[str]
+    player_tags: list[str]
 
     @classmethod
     def from_api(cls, data: dict) -> ClashClan:
@@ -23,7 +23,7 @@ class ClashClan:
             tag=data['tag'], 
             name=data['name'],
             player_tags = [
-                player.tag
+                player['tag']
                 for player in data['memberList']
             ]
         )
@@ -51,7 +51,7 @@ class ClashPlayer:
             tag=data['tag'],
             name=data['name'],
             town_hall=data['townHallLevel'],
-            clan_tag=(data.get('clan')['tag'] or None),
+            clan_tag=((data.get('clan')['tag']) or None),
             king=heroes.get("Barbarian King", 0),
             queen=heroes.get("Archer Queen", 0),
             minion=heroes.get("Minion Prince", 0),
@@ -64,6 +64,7 @@ class ClashPlayer:
 class ClashWar:
     our_clan_tag: str
     enemy_clan_tag: str
+    enemy_clan_name: str
     end_time: datetime
     start_time: datetime
     war_type: WarType
@@ -84,6 +85,7 @@ class ClashWar:
         return cls(
             our_clan_tag=data["clan"]["tag"],
             enemy_clan_tag=data["opponent"]["tag"],
+            enemy_clan_name=data['opponent']['name'],
             end_time=parse_coc_datetime(data["endTime"]),
             start_time=parse_coc_datetime(data["startTime"]),
             war_type=WarType.RANDOM,
@@ -99,6 +101,8 @@ class ClashAttack:
     attack_number: int
     stars: int
     destruction: int
+    fresh_hit: bool
+    cleanup: bool
     attack_time: int
 
     @classmethod
@@ -127,7 +131,7 @@ class ClashWarParticipant:
         return cls(
             player_tag=data['tag'],
             map_position=data['mapPosition'],
-            town_hall=data['townHallLevel'],
+            town_hall=data['townhallLevel'],
             clan_tag=clan_tag,
             attacks=[
                 ClashAttack.from_api(attack)
