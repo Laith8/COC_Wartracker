@@ -38,8 +38,6 @@ class WarResult(str, Enum):
     WIN = "win"
     LOSS = "loss"
     DRAW = "draw"
-    ENDED_UNKNOWN = "ended_unknown"
-    PENDING = "pending"
 
 
 # ----------------------------------------------------
@@ -53,10 +51,16 @@ class Clan(Base):
     tag = Column(String, unique=True, nullable=False, index=True)
     name = Column(String, nullable=False)
 
+    badge_url = Column(String, nullable=True)
+    clan_level = Column(Integer, nullable=False)
+    war_wins = Column(Integer, nullable=False)
+    war_draws = Column(Integer, nullable=False)
+    war_losses = Column(Integer, nullable=False)
+
     is_tracked = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=utcnow, nullable=False)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    last_synced_at = Column(DateTime, default=utcnow, nullable=False)
 
     players = relationship("Player", back_populates="clan")
 
@@ -70,6 +74,10 @@ class Clan(Base):
         back_populates="enemy_clan",
         foreign_keys="War.enemy_clan_tag",
     )
+
+    @property
+    def member_count(self):
+        return len(self.players)
 
 
 # ----------------------------------------------------
@@ -132,11 +140,9 @@ class War(Base):
     enemy_clan_tag = Column(String, ForeignKey("clans.tag"), nullable=False, index=True)
 
     size = Column(Integer, nullable=False)
+    attacks_allowed = Column(Integer, default=2, nullable=False)
 
-    result = Column(SQLEnum(WarResult), default=WarResult.PENDING, nullable=False)
-
-    our_destruction = Column(Integer, default=0, nullable=False)
-    enemy_destruction = Column(Integer, default=0, nullable=False)
+    result = Column(SQLEnum(WarResult), nullable=True)
 
     our_clan = relationship(
         "Clan", back_populates="wars_as_our_clan", foreign_keys=[our_clan_tag]
@@ -216,8 +222,6 @@ class WarParticipant(Base):
     champion = Column(Integer, default=0, nullable=False)
     duke = Column(Integer, default=0, nullable=False)
 
-    attacks_allowed = Column(Integer, default=2, nullable=False)
-
     war = relationship("War", back_populates="participants")
     player = relationship("Player", back_populates="participations")
     clan = relationship("Clan")
@@ -239,6 +243,8 @@ class WarParticipant(Base):
         ),
         back_populates="defender",
     )
+
+    clan = relationship("Clan")
 
     @property
     def attacks_used(self):
@@ -262,9 +268,7 @@ class WarParticipant(Base):
 
     @property
     def missed_attacks(self):
-        if self.attacks_allowed is None:
-            return None
-        return max(self.attacks_allowed - self.attacks_used, 0)
+        return max(self.war.attacks_allowed - self.attacks_used, 0)
 
     __table_args__ = (
         UniqueConstraint("war_id", "player_tag"),
@@ -281,8 +285,8 @@ class Attack(Base):
     id = Column(Integer, primary_key=True)
 
     war_id = Column(Integer, ForeignKey("wars.id"), nullable=False, index=True)
-    attacker_id = Column(String, nullable=False, index=True)
-    defender_id = Column(String, nullable=False, index=True)
+    attacker_tag = Column(String, nullable=False, index=True)
+    defender_tag = Column(String, nullable=False, index=True)
     attack_number = Column(Integer, nullable=False)
 
     stars = Column(Integer, nullable=False)
@@ -291,7 +295,7 @@ class Attack(Base):
     fresh_hit = Column(Boolean, default=False, nullable=False)
     cleanup = Column(Boolean, default=False, nullable=False)
 
-    attack_time = Column(Integer, default=0, nullable=False)
+    duration_seconds = Column(Integer, default=0, nullable=False)
 
     war = relationship("War", back_populates="attacks")
 
@@ -299,7 +303,7 @@ class Attack(Base):
         "WarParticipant",
         primaryjoin=lambda: (
             (Attack.war_id == WarParticipant.war_id)
-            & (Attack.attacker_id == foreign(WarParticipant.player_tag))
+            & (Attack.attacker_tag == foreign(WarParticipant.player_tag))
         ),
         viewonly=True,
     )
@@ -308,22 +312,22 @@ class Attack(Base):
         "WarParticipant",
         primaryjoin=lambda: (
             (Attack.war_id == WarParticipant.war_id)
-            & (Attack.defender_id == foreign(WarParticipant.player_tag))
+            & (Attack.defender_tag == foreign(WarParticipant.player_tag))
         ),
         viewonly=True,
     )
 
     __table_args__ = (
         UniqueConstraint(
-            "war_id", "attacker_id", "attack_number",
+            "war_id", "attacker_tag", "attack_number",
             name="uq_attack_war_attacker_number",
         ),
         ForeignKeyConstraint(
-            ["war_id", "attacker_id"],
+            ["war_id", "attacker_tag"],
             ["war_participants.war_id", "war_participants.player_tag"],
         ),
         ForeignKeyConstraint(
-            ["war_id", "defender_id"],
+            ["war_id", "defender_tag"],
             ["war_participants.war_id", "war_participants.player_tag"],
         ),
     )
