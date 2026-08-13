@@ -1,136 +1,128 @@
-import asyncio
 from coc_client import ClashClient
 from db_client import DbClient
-import os
-from models import utcnow, WarType, WarResult
-from datetime import datetime, timezone
-
-def get_hero_level(player_data: dict, hero_name: str) -> int | None:
-    for hero in player_data.get("heroes", []):
-        if hero["name"] == hero_name:
-            return hero["level"]
-
-    return 0 # as in level 0, not unlocked
-
-def parse_coc_datetime(value: str) -> datetime:
-    return datetime.strptime(
-        value,
-        "%Y%m%dT%H%M%S.%fZ",
-    ).replace(tzinfo=timezone.utc)
+import os, httpx, sys, asyncio
 
 async def refresh():
     cclient = ClashClient()
     dbclient = DbClient()
-    tracked_clandata = [
-        {'id':i.id,
-        'tag':i.tag}
-        for i in await dbclient.get_tracked_clans()
+
+    tracked_clans = [
+        clan.tag
+        for clan in await dbclient.get_tracked_clans()
     ]
-    if len(tracked_clandata) < 1:
-        return
-    tracked_clantags = [i['tag'] for i in tracked_clandata]
-    clanslistwithmembers = await (
-        asyncio.gather(
-            *[cclient.get_members(tag) for tag in tracked_clantags]
-        )
+    if len(tracked_clans) < 1: return
+
+    clansdata = await asyncio.gather(
+        *[cclient.get_clan(tag) for tag in tracked_clans]
     )
-    playertags = []
-    for i in clanslistwithmembers:
-        for j in i['items']:
-            playertags.append(j['tag'])
-    playerdata = await (
-        asyncio.gather(
-            *[cclient.get_player(tag) for tag in playertags]
-        )
+    playertags = [
+        playertag
+        for clan in clansdata
+        for playertag in clan.player_tags
+    ]
+    players = await asyncio.gather(
+        *[cclient.get_player(tag) for tag in playertags]
     )
-    for i in playerdata:
-        await dbclient.upsert_player(
-            tag=i['tag'],
-            name=i['name'],
-            town_hall=i['townHallLevel'],
-            clan_tag=i['clan']['tag'],
-            king=get_hero_level(i,'Barbarian King'),
-            queen=get_hero_level(i,'Archer Queen'),
-            minion=get_hero_level(i, 'Minion Prince'),
-            warden=get_hero_level(i, 'Grand Warden'),
-            champion=get_hero_level(i, 'Royal Champion'),
-            duke=get_hero_level(i, 'Dragon Duke')
-        )
-    wardata = await asyncio.gather(*[cclient.get_wardata(tag) for tag in tracked_clantags])
-    for war in wardata:
-        await dbclient.upsert_clan(
-            tag=war['opponent']['tag'],
-            name=war['opponent']['name'],
-        )
-        war_instance = await dbclient.upsert_war(
-            our_clan_tag=war['clan']['tag'],
-            enemy_clan_tag=war['opponent']['tag'],
-            end_time=parse_coc_datetime(war['endTime']),
-            start_time=parse_coc_datetime(war['startTime']),
-            war_type=WarType.RANDOM,
-            size=war['teamSize'],
-            result=WarResult.PENDING if war['state'] in ('preparation', 'inMatchmaking', 'war', 'inWar', 'matched') else WarResult.ENDED_UNKNOWN,
-        )
-        enemy_playertags = [player['tag'] for player in (await cclient.get_members(war['opponent']['tag']))['items']]
-        enemy_playerdata = [await cclient.get_player(tag) for tag in enemy_playertags]
-        for i in enemy_playerdata:
-            await dbclient.upsert_player(
-                tag=i['tag'],
-                name=i['name'],
-                town_hall=i['townHallLevel'],
-                clan_tag=i['clan']['tag'],
-                king=get_hero_level(i,'Barbarian King'),
-                queen=get_hero_level(i,'Archer Queen'),
-                minion=get_hero_level(i, 'Minion Prince'),
-                warden=get_hero_level(i, 'Grand Warden'),
-                champion=get_hero_level(i, 'Royal Champion'),
-                duke=get_hero_level(i, 'Dragon Duke')
+    await asyncio.gather(
+        *[
+            dbclient.upsert_player(
+                tag=player.tag,
+                name=player.name,
+                town_hall=player.town_hall,
+                clan_tag=player.clan_tag,
+                king=player.king,
+                queen=player.queen,
+                minion=player.minion,
+                warden=player.warden,
+                champion=player.champion,
+                duke=player.duke,
             )
-        attacks = []
-        for participant in war['opponent']['members']:
-            participant_instance = await dbclient.upsert_war_participant(
-                war_id=war_instance.id,
-                player_tag=participant['tag'],
-                clan_tag=war['opponent']['tag'],
-                map_position=participant['mapPosition'],
-                town_hall=participant['townhallLevel'],
-                attacks_allowed=war['attacksPerMember']
-            )
-        for participant in war['clan']['members']:
-            participant_instance = await dbclient.upsert_war_participant(
-                war_id=war_instance.id,
-                player_tag=participant['tag'],
-                clan_tag=war['clan']['tag'],
-                map_position=participant['mapPosition'],
-                town_hall=participant['townhallLevel'],
-                attacks_allowed=war['attacksPerMember']
-            )
-        for participant in [*war['clan']['members'], *war['opponent']['members']]:
-            attacks = participant.get('attacks')
-            if not attacks:
-                continue
-            for i in attacks:
-                await dbclient.upsert_attack(
-                    war_id=war_instance.id,
-                    attacker_id=i['attackerTag'],
-                    defender_id=i['defenderTag'],
-                    attack_number=i['order'],
-                    stars=i['stars'],
-                    destruction=i['destructionPercentage'],
-                    fresh_hit=True if i['order'] == 1 else False,
-                    cleanup=True if i['order'] > 1 else False,
-                    attack_time=i['duration'],
-                )
-    return
+            for player in players
+        ]
+    )
+    wars = await asyncio.gather(*[cclient.get_war(tag) for tag in tracked_clans])
+    await asyncio.gather(*[
+        dbclient.upsert_clan(
+            tag=war.enemy_clan_tag,
+            name=war.enemy_clan_name,
+        )
+        for war in wars
+    ])
+    db_wars = await asyncio.gather(*[
+        dbclient.upsert_war(
+            our_clan_tag=war.our_clan_tag,
+            enemy_clan_tag=war.enemy_clan_tag,
+            end_time=war.end_time,
+            start_time=war.start_time,
+            war_type=war.war_type,
+            size=war.size,
+            result=war.result,
+        )
+        for war in wars
+    ])
+
+    enemy_playerdata = await asyncio.gather(*[
+        cclient.get_player(participant.player_tag)
+        for war in wars
+        for participant in war.participants
+        if participant.clan_tag == war.enemy_clan_tag
+    ])
+
+    await asyncio.gather(*[
+        dbclient.upsert_player(
+            tag=player.tag,
+            name=player.name,
+            town_hall=player.town_hall,
+            clan_tag=player.clan_tag,
+            king=player.king,
+            queen=player.queen,
+            minion=player.minion,
+            warden=player.warden,
+            champion=player.champion,
+            duke=player.duke,
+        )
+        for player in enemy_playerdata
+    ])
+
+    await asyncio.gather(*[
+        dbclient.upsert_war_participant(
+            war_id=db_war.id,
+            player_tag=participant.player_tag,
+            clan_tag=participant.clan_tag,
+            map_position=participant.map_position,
+            town_hall=participant.town_hall,
+            attacks_allowed=2
+        )
+        for war, db_war in zip(wars, db_wars)
+        for participant in war.participants
+    ])
+
+    await asyncio.gather(*[
+        dbclient.upsert_attack(
+            war_id=db_war.id,
+            attacker_id=attack.attacker_tag,
+            defender_id=attack.defender_tag,
+            attack_number=attack.attack_number,
+            stars=attack.stars,
+            destruction=attack.destruction,
+            fresh_hit=attack.fresh_hit,
+            cleanup=attack.cleanup,
+            attack_time=attack.attack_time,
+        )
+        for war, db_war in zip(wars, db_wars)
+        for participant in war.participants
+        for attack in participant.attacks
+    ])
 
 async def refresh_loop():
     try:
         while True:
-            await asyncio.sleep(5)
             print('start refresh')
-            await refresh()
+            try:
+                await refresh()
+            except httpx.HTTPStatusError:
+                sys.exit(1)
             print('finish refresh')
-            await asyncio.sleep(60)
+            await asyncio.sleep(int(os.getenv('PASSIVE_REFRESH_SECONDS',100)))
     except asyncio.CancelledError:
         print("Stopping refresh loop...")
-        raise
