@@ -1,11 +1,7 @@
-import httpx
-from urllib.parse import quote
 from models import Clan, Player, PlayerClanHistory, War, WarParticipant, Attack, WarResult, WarType
-from sqlalchemy import select
-from database import get_db, engine, SessionLocal
-from sqlalchemy.orm import Session
-import os
 from datetime import datetime, timezone
+from database import SessionLocal
+from sqlalchemy import select
 
 class _Unset:
     pass
@@ -20,21 +16,40 @@ class DbClient:
         self,
         tag: str,
         name: str | None = None,
-        is_tracked: bool = None
+        badge_url: str | None = None,
+        clan_level: int | None = None,
+        war_wins: int | None = None,
+        war_draws: int | None = None,
+        war_losses: int | None = None,
+        is_tracked: bool | None = None,
     ) -> Clan:
         async with SessionLocal() as session:
             clan = await session.scalar(select(Clan).where(Clan.tag == tag))
+
+            clan_fields = {
+                "name": name,
+                "badge_url": badge_url,
+                "clan_level": clan_level,
+                "war_wins": war_wins,
+                "war_draws": war_draws,
+                "war_losses": war_losses,
+                "is_tracked": is_tracked,
+            }
+
             if clan:
-                if name is not None:
-                    clan.name = name
-                if is_tracked:
-                    clan.is_tracked = is_tracked
+                for field, value in clan_fields.items():
+                    if value is not None:
+                        setattr(clan, field, value)
+                clan.last_synced_at = utcnow()
             else:
-                if name is None: 
-                    raise ValueError(f'clan name is "None" on insertion')
-                is_tracked = False if is_tracked is None else is_tracked
-                clan = Clan(tag=tag, name=name, is_tracked=is_tracked)
+                required_fields = {"name", "clan_level", "war_wins", "war_draws", "war_losses"}
+                missing_required = [f for f in required_fields if clan_fields[f] is None]
+                if missing_required:
+                    raise ValueError(f'required field(s) {missing_required} is "None" on insertion')
+                filtered_fields = {k: v for k, v in clan_fields.items() if v is not None}
+                clan = Clan(tag=tag, is_tracked=is_tracked or False, **filtered_fields)
                 session.add(clan)
+
             await session.commit()
             await session.refresh(clan)
         return clan
@@ -43,19 +58,18 @@ class DbClient:
         self,
         tag: str,
         name: str | None = None,
-        town_hall: int | None  = None,
+        town_hall: int | None = None,
         clan_tag: str | None | _Unset = _UNSET,
-        king: int | None  = None,
-        queen: int | None  = None,
-        minion: int | None  = None,
-        warden: int | None  = None,
-        champion: int | None = None,
-        duke: int | None = None
+        king: int | None = None,
+        queen: int | None = None,
+        minion: int | None = None,
+        warden: int | None = None,
+        champion: int | None= None,
+        duke: int | None = None,
     ) -> Player:
         async with SessionLocal() as session:
             player = await session.scalar(select(Player).where(Player.tag == tag))
             player_fields = {
-                "tag": tag,
                 "name": name,
                 "town_hall": town_hall,
                 "king": king,
@@ -100,7 +114,7 @@ class DbClient:
                         player_fields[f] = 0
 
                 resolved_clan_tag = None if clan_tag is _UNSET else clan_tag
-                player = Player(**player_fields, clan_tag=resolved_clan_tag)
+                player = Player(tag=tag, **player_fields, clan_tag=resolved_clan_tag)
                 session.add(player)
                 if resolved_clan_tag is not None:
                     session.add(PlayerClanHistory(
@@ -120,6 +134,7 @@ class DbClient:
         start_time: datetime | None = None,
         war_type: WarType | None = None,
         size: int | None = None,
+        attacks_allowed: int | None = None,
         result: WarResult | None = None,
     ) -> War:
         async with SessionLocal() as session:
@@ -132,12 +147,10 @@ class DbClient:
             )
 
             war_fields = {
-                "our_clan_tag": our_clan_tag,
-                "enemy_clan_tag": enemy_clan_tag,
-                "end_time": end_time,
                 "start_time": start_time,
                 "war_type": war_type,
                 "size": size,
+                "attacks_allowed": attacks_allowed,
                 "result": result,
             }
 
@@ -146,12 +159,17 @@ class DbClient:
                     if value is not None:
                         setattr(war, field, value)
             else:
-                required_fields = {'start_time', 'size', 'war_type'}
+                required_fields = {"start_time", "size", "war_type"}
                 missing_required = [f for f in required_fields if war_fields[f] is None]
                 if missing_required:
                     raise ValueError(f'required field(s) {missing_required} is "None" on insertion')
                 filtered_fields = {k: v for k, v in war_fields.items() if v is not None}
-                war = War(**filtered_fields)
+                war = War(
+                    our_clan_tag=our_clan_tag,
+                    enemy_clan_tag=enemy_clan_tag,
+                    end_time=end_time,
+                    **filtered_fields,
+                )
                 session.add(war)
 
             await session.commit()
@@ -166,7 +184,6 @@ class DbClient:
         clan_tag: str | None = None,
         map_position: int | None = None,
         town_hall: int | None = None,
-        attacks_allowed: int | None = None,
     ) -> WarParticipant:
         async with SessionLocal() as session:
             participant = await session.scalar(
@@ -175,23 +192,11 @@ class DbClient:
                     WarParticipant.player_tag == player_tag,
                 )
             )
-            player = await session.scalar(
-                select(Player).where(Player.tag == player_tag)
-            )
 
             participant_fields = {
-                "war_id": war_id,
-                "player_tag": player_tag,
                 "clan_tag": clan_tag,
                 "map_position": map_position,
                 "town_hall": town_hall,
-                "attacks_allowed": attacks_allowed,
-                "king": player.king,
-                "queen": player.queen,
-                "minion": player.minion,
-                "warden": player.warden,
-                "champion": player.champion,
-                "duke": player.duke,
             }
 
             if participant:
@@ -199,12 +204,29 @@ class DbClient:
                     if value is not None:
                         setattr(participant, field, value)
             else:
-                required_fields = {'clan_tag', 'map_position', 'town_hall'}
+                required_fields = {"clan_tag", "map_position", "town_hall"}
                 missing_required = [f for f in required_fields if participant_fields[f] is None]
                 if missing_required:
                     raise ValueError(f'required field(s) {missing_required} is "None" on insertion')
+
+                player = await session.scalar(
+                    select(Player).where(Player.tag == player_tag)
+                )
+                if player is None:
+                    raise ValueError(f'no player found with tag "{player_tag}" on insertion')
+
                 filtered_fields = {k: v for k, v in participant_fields.items() if v is not None}
-                participant = WarParticipant(**filtered_fields)
+                participant = WarParticipant(
+                    war_id=war_id,
+                    player_tag=player_tag,
+                    king=player.king,
+                    queen=player.queen,
+                    minion=player.minion,
+                    warden=player.warden,
+                    champion=player.champion,
+                    duke=player.duke,
+                    **filtered_fields,
+                )
                 session.add(participant)
 
             await session.commit()
@@ -215,34 +237,30 @@ class DbClient:
     async def upsert_attack(
         self,
         war_id: int,
-        attacker_id: int,
-        defender_id: int,
+        attacker_tag: str,
+        defender_tag: str,
         attack_number: int,
-        stars: int,
-        destruction: int,
+        stars: int | None = None,
+        destruction: int | None = None,
         fresh_hit: bool | None = None,
         cleanup: bool | None = None,
-        attack_time: int | None = None,
+        duration_seconds: int | None = None,
     ) -> Attack:
         async with SessionLocal() as session:
             attack = await session.scalar(
                 select(Attack).where(
                     Attack.war_id == war_id,
-                    Attack.attacker_id == attacker_id,
+                    Attack.attacker_tag == attacker_tag,
                     Attack.attack_number == attack_number,
                 )
             )
 
             attack_fields = {
-                "war_id": war_id,
-                "attacker_id": attacker_id,
-                "defender_id": defender_id,
-                "attack_number": attack_number,
                 "stars": stars,
                 "destruction": destruction,
                 "fresh_hit": fresh_hit,
                 "cleanup": cleanup,
-                "attack_time": attack_time,
+                "duration_seconds": duration_seconds,
             }
 
             if attack:
@@ -250,8 +268,18 @@ class DbClient:
                     if value is not None:
                         setattr(attack, field, value)
             else:
+                required_fields = {"stars", "destruction"}
+                missing_required = [f for f in required_fields if attack_fields[f] is None]
+                if missing_required:
+                    raise ValueError(f'required field(s) {missing_required} is "None" on insertion')
                 filtered_fields = {k: v for k, v in attack_fields.items() if v is not None}
-                attack = Attack(**filtered_fields)
+                attack = Attack(
+                    war_id=war_id,
+                    attacker_tag=attacker_tag,
+                    defender_tag=defender_tag,
+                    attack_number=attack_number,
+                    **filtered_fields,
+                )
                 session.add(attack)
 
             await session.commit()
@@ -267,7 +295,7 @@ class DbClient:
         return response
 
     async def resolve_war_statuses(self) -> None:
-        q = select(War).where(War.result.is_(WarResult.ENDED_UNKNOWN))
+        q = select(War).where(War.result.is_(None))
         async with SessionLocal() as session:
             result = await session.scalars(q)
             response = result.all()
