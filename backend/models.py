@@ -230,7 +230,7 @@ class WarParticipant(Base):
         "Attack",
         primaryjoin=lambda: (
             (WarParticipant.war_id == Attack.war_id)
-            & (WarParticipant.player_tag == foreign(Attack.attacker_id))
+            & (WarParticipant.player_tag == foreign(Attack.attacker_tag))
         ),
         back_populates="attacker",
     )
@@ -239,7 +239,7 @@ class WarParticipant(Base):
         "Attack",
         primaryjoin=lambda: (
             (WarParticipant.war_id == Attack.war_id)
-            & (WarParticipant.player_tag == foreign(Attack.defender_id))
+            & (WarParticipant.player_tag == foreign(Attack.defender_tag))
         ),
         back_populates="defender",
     )
