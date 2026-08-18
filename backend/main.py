@@ -29,7 +29,18 @@ async def read_clans():
 @app.get('/test/addmyclan')
 async def test_add():
     dbclient = DbClient()
-    await dbclient.upsert_clan('#2JV9LCUVC','urgeschichte',True)
+    clan = await ClashClient().get_clan('#2JV9LCUVC')
+    await dbclient.upsert_clan(
+            tag=clan.tag,
+            name=clan.name,
+            badge_url=clan.badge_url,
+            clan_level=clan.clan_level,
+            war_wins=clan.war_wins,
+            war_draws=clan.war_draws,
+            war_losses=clan.war_losses,
+            is_tracked=True
+        )
+    return 0
 
 @app.get("/members")
 async def read_members():
