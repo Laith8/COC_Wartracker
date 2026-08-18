@@ -41,13 +41,29 @@ async def refresh():
         ]
     )
     wars = await asyncio.gather(*[cclient.get_war(tag) for tag in tracked_clans])
+
+    enemy_clan_tags = [
+        war.enemy_clan_tag
+        for war in wars
+    ]
+
+    enemy_clandata = await asyncio.gather(
+        *[cclient.get_clan(tag) for tag in enemy_clan_tags]
+    )
+
     await asyncio.gather(*[
         dbclient.upsert_clan(
-            tag=war.enemy_clan_tag,
-            name=war.enemy_clan_name,
+            tag=clan.tag,
+            name=clan.name,
+            badge_url=clan.badge_url,
+            clan_level=clan.clan_level,
+            war_wins=clan.war_wins,
+            war_draws=clan.war_draws,
+            war_losses=clan.war_losses,
         )
-        for war in wars
+        for clan in enemy_clandata
     ])
+
     db_wars = await asyncio.gather(*[
         dbclient.upsert_war(
             our_clan_tag=war.our_clan_tag,
@@ -91,7 +107,6 @@ async def refresh():
             clan_tag=participant.clan_tag,
             map_position=participant.map_position,
             town_hall=participant.town_hall,
-            attacks_allowed=2
         )
         for war, db_war in zip(wars, db_wars)
         for participant in war.participants
@@ -100,14 +115,14 @@ async def refresh():
     await asyncio.gather(*[
         dbclient.upsert_attack(
             war_id=db_war.id,
-            attacker_id=attack.attacker_tag,
-            defender_id=attack.defender_tag,
+            attacker_tag=attack.attacker_tag,
+            defender_tag=attack.defender_tag,
             attack_number=attack.attack_number,
             stars=attack.stars,
             destruction=attack.destruction,
             fresh_hit=attack.fresh_hit,
             cleanup=attack.cleanup,
-            attack_time=attack.attack_time,
+            duration_seconds=attack.duration_seconds,
         )
         for war, db_war in zip(wars, db_wars)
         for participant in war.participants

@@ -15,6 +15,11 @@ def parse_coc_datetime(value: str) -> datetime:
 class ClashClan:
     tag: str
     name: str
+    badge_url: str
+    clan_level: int
+    war_wins: int
+    war_draws: int
+    war_losses: int
     player_tags: list[str]
 
     @classmethod
@@ -22,6 +27,11 @@ class ClashClan:
         return cls(
             tag=data['tag'], 
             name=data['name'],
+            badge_url=data['badgeUrls']['large'],
+            clan_level=data['clanLevel'],
+            war_wins=data['warWins'],
+            war_draws=data['warTies'],
+            war_losses=data['warLosses'],
             player_tags = [
                 player['tag']
                 for player in data['memberList']
@@ -69,7 +79,7 @@ class ClashWar:
     start_time: datetime
     war_type: WarType
     size: int
-    result: WarResult
+    result: WarResult | None
     participants: list[ClashWarParticipant]
 
     @classmethod
@@ -90,7 +100,7 @@ class ClashWar:
             start_time=parse_coc_datetime(data["startTime"]),
             war_type=WarType.RANDOM,
             size=data["teamSize"],
-            result=WarResult.ENDED_UNKNOWN if data['state'] == 'ended' else WarResult.PENDING,
+            result=None,
             participants=[*our_participants, *enemy_participants]
         )
 
@@ -103,7 +113,7 @@ class ClashAttack:
     destruction: int
     fresh_hit: bool
     cleanup: bool
-    attack_time: int
+    duration_seconds: int
 
     @classmethod
     def from_api(cls, data: dict) -> ClashAttack:
@@ -115,7 +125,7 @@ class ClashAttack:
             destruction=data['destructionPercentage'],
             fresh_hit=True if data['order'] == 1 else False,
             cleanup=True if data['order'] > 1 else False,
-            attack_time=data['duration'],
+            duration_seconds=data['duration'],
         )
 
 @dataclass
